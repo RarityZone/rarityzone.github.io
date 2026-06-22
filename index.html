@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lemonade Tycoon — Tokenomics PoC</title>
+  <style>
+    :root {
+      --bg: #0f1419; --surface: #1a2332; --border: #2d3a4f; --text: #e8edf4;
+      --muted: #8b9cb3; --lemon: #ffd54f; --burn: #ff6b6b; --mint: #69db7c; --accent: #4dabf7;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; padding: 1rem; max-width: 1400px; margin: 0 auto; }
+    h1 { font-size: 1.5rem; color: var(--lemon); }
+    h2 { font-size: 1rem; color: var(--lemon); margin-bottom: 0.75rem; border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
+    .subtitle { color: var(--muted); font-size: 0.85rem; margin-bottom: 1rem; }
+    .grid { display: grid; gap: 1rem; }
+    .grid-2 { grid-template-columns: 1fr 1fr; }
+    .grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+    @media (max-width: 900px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; }
+    .stat-row { display: flex; justify-content: space-between; padding: 0.25rem 0; font-size: 0.9rem; }
+    .stat-row span:last-child { font-weight: 600; font-variant-numeric: tabular-nums; }
+    .lemon { color: var(--lemon); } .burn { color: var(--burn); } .mint-col { color: var(--mint); }
+    button { background: var(--lemon); color: #1a1a1a; border: none; border-radius: 6px; padding: 0.5rem 0.75rem; font-weight: 600; cursor: pointer; font-size: 0.85rem; }
+    button:hover { filter: brightness(1.1); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; filter: none; }
+    button.secondary { background: var(--border); color: var(--text); }
+    button.danger { background: var(--burn); color: #fff; }
+    .shop-card { border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem; margin-bottom: 0.5rem; display: grid; grid-template-columns: 1fr auto; gap: 0.5rem; align-items: center; }
+    .shop-card .name { font-weight: 600; font-size: 0.9rem; }
+    .shop-card .meta { font-size: 0.75rem; color: var(--muted); grid-column: 1 / -1; }
+    .shop-card .owned { color: var(--accent); font-size: 0.8rem; }
+    .controls { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem; align-items: center; }
+    label { font-size: 0.85rem; color: var(--muted); }
+    input[type="number"], select { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 0.35rem 0.5rem; border-radius: 4px; width: 5rem; }
+    input.wide { width: 6rem; }
+    input[type="range"] { width: 140px; vertical-align: middle; accent-color: var(--lemon); }
+    .mix-label { font-size: 0.85rem; color: var(--lemon); min-width: 11rem; display: inline-block; }
+    .banner { background: linear-gradient(90deg, #2d3a4f, #1a2332); border: 1px dashed #c9a227; border-radius: 6px; padding: 0.5rem 1rem; text-align: center; font-size: 0.8rem; color: var(--muted); margin-bottom: 1rem; }
+    .banner.active { color: var(--lemon); border-style: solid; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th, td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 500; }
+    .rate-big { font-size: 1.75rem; font-weight: 700; color: var(--mint); }
+    .bar-wrap { height: 8px; background: var(--bg); border-radius: 4px; overflow: hidden; margin-top: 0.5rem; }
+    .bar-burn { height: 100%; background: var(--burn); float: left; }
+    .bar-mint { height: 100%; background: var(--mint); float: left; }
+    .upgrade-btn { width: 100%; margin-top: 0.35rem; font-size: 0.8rem; padding: 0.4rem; }
+    #simResults { margin-top: 0.75rem; font-size: 0.8rem; color: var(--muted); white-space: pre-wrap; font-family: ui-monospace, monospace; line-height: 1.6; max-height: 280px; overflow-y: auto; }
+    footer { margin-top: 1.5rem; font-size: 0.75rem; color: var(--muted); text-align: center; }
+  </style>
+</head>
+<body>
+
+  <h1>🍋 Lemonade Tycoon — Tokenomics PoC</h1>
+  <p class="subtitle">v0.3.1 — <strong>manual + simulation share identical constants</strong> (one file, one tune)</p>
+
+  <div class="banner" id="sponsorBanner">✈️ Sponsor banner slot</div>
+
+  <div class="grid grid-3">
+    <div class="panel">
+      <h2>Season</h2>
+      <div class="stat-row"><span>Status</span><span id="seasonStatus">Not started</span></div>
+      <div class="stat-row"><span>Time left</span><span id="seasonTime">—</span></div>
+      <div class="stat-row"><span>Stake locked</span><span id="stakeAmt" class="lemon">0</span></div>
+      <div class="controls" style="margin-top:0.75rem">
+        <label>Start $LEMON <input type="number" id="startBalance" value="1001" min="1001" step="100"></label>
+        <label>Stake <input type="number" id="stakeInput" value="1000" min="100" step="100"></label>
+        <label>Days <input type="number" id="seasonDays" value="14" min="1" max="90"></label>
+        <label>Speed <select id="speedMult"><option value="1">1×</option><option value="10">10×</option><option value="60">60×</option><option value="3600">3600×</option></select></label>
+      </div>
+      <div class="controls">
+        <button id="btnStartSeason">Start Season</button>
+        <button id="btnEndSeason" class="secondary" disabled>Force End</button>
+        <button id="btnEarlyUnstake" class="danger" disabled>Early Unstake (−50%)</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Your Empire</h2>
+      <div class="rate-big" id="prodRate">0 /sec net</div>
+      <div class="stat-row"><span>$/game-hr</span><span id="hourlyRate" class="mint-col">0</span></div>
+      <div class="stat-row"><span>$/real-min <span id="speedHint" style="color:var(--muted)">(1×)</span></span><span id="realMinRate">0</span></div>
+      <div class="stat-row"><span>Wallet</span><span id="wallet" class="lemon">0</span></div>
+      <div class="stat-row"><span>Net worth</span><span id="netWorth" class="lemon">0</span></div>
+      <div class="stat-row"><span>Earned (season)</span><span id="earned" class="mint-col">0</span></div>
+      <div class="stat-row"><span>Spent (season)</span><span id="spent">0</span></div>
+      <div class="stat-row"><span>Invested</span><span id="invested">0</span></div>
+    </div>
+
+    <div class="panel">
+      <h2>Tokenomics (you)</h2>
+      <div class="stat-row"><span>Minted</span><span id="totalMinted" class="mint-col">0</span></div>
+      <div class="stat-row"><span>Burned</span><span id="totalBurned" class="burn">0</span></div>
+      <div class="stat-row"><span>↳ upkeep</span><span id="upkeepBurned" class="burn">0</span></div>
+      <div class="stat-row"><span>↳ purchases</span><span id="purchaseBurned" class="burn">0</span></div>
+      <div class="stat-row"><span>Net supply Δ</span><span id="netSupply">0</span></div>
+      <div class="stat-row"><span>Economy</span><span id="economyHealth">—</span></div>
+      <div class="bar-wrap" id="supplyBar"></div>
+      <p style="font-size:0.75rem;color:var(--muted);margin-top:0.5rem" id="econConstants">—</p>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:1rem">
+    <h2>Multi-Player Simulation</h2>
+    <p style="font-size:0.8rem;color:var(--muted);margin-bottom:0.75rem">Real players differ: <strong>join time</strong>, <strong>extra $LEMON from DEX</strong> (MON/USDC), <strong>spins</strong>, and play style. Identical bots tie — this models variance.</p>
+    <div class="controls">
+      <label>Players <input type="number" id="simPlayers" class="wide" value="100" min="1" max="10000"></label>
+      <label>Days <input type="number" id="simDays" value="14" min="1" max="90"></label>
+      <label>Stake <input type="number" id="simStake" value="1000" min="100"></label>
+      <label>Global pool <select id="simPool"><option value="off" selected>Off (competition model)</option><option value="on">On (stake×2.5/player cap)</option></select></label>
+      <button id="btnRunSim">Run Simulation</button>
+    </div>
+    <div class="controls" style="align-items:center">
+      <label>Player mix</label>
+      <span style="font-size:0.8rem;color:var(--muted)">Casual</span>
+      <input type="range" id="simEfficientPct" min="0" max="100" value="50" step="5">
+      <span style="font-size:0.8rem;color:var(--muted)">Efficient</span>
+      <span class="mix-label" id="simMixLabel">50% efficient · 50% casual</span>
+    </div>
+    <div class="controls">
+      <label>Avg DEX buy <input type="number" id="simAvgMarket" value="200" min="0" step="50" title="Avg extra $LEMON bought from market per player (who buys)"></label>
+      <label>% buy DEX <input type="number" id="simMarketPct" value="40" min="0" max="100" title="% of players who buy extra $LEMON from DEX"></label>
+      <label>Avg spins <input type="number" id="simAvgSpins" value="5" min="0" max="100" step="1" title="Avg spinner plays per player per season"></label>
+      <label>Join spread (d) <input type="number" id="simJoinSpread" value="5" min="0" max="14" step="1" title="Max days into season players can join"></label>
+    </div>
+    <div id="simResults">Click Run Simulation to see aggregate tokenomics.</div>
+  </div>
+
+  <div class="grid grid-2" style="margin-top:1rem">
+    <div class="panel">
+      <h2>Shops <span style="font-weight:400;color:var(--muted)">(60% burn)</span></h2>
+      <div id="shopList"></div>
+    </div>
+    <div class="panel">
+      <h2>Upgrades <span style="font-weight:400;color:var(--muted)">(60% burn)</span></h2>
+      <div id="upgradeList"></div>
+      <h2 style="margin-top:1rem">Spinner <span style="font-weight:400;color:var(--muted)">(60% burn)</span></h2>
+      <div class="stat-row"><span>Cost</span><span id="spinCost" class="lemon">12</span></div>
+      <button id="btnSpin" disabled>Spin!</button>
+      <div id="spinResult" style="margin-top:0.5rem;font-size:0.85rem;color:var(--muted)">—</div>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:1rem">
+    <h2>Leaderboard (net worth)</h2>
+    <table>
+      <thead><tr><th>#</th><th>Player</th><th>Net worth</th><th>$/sec</th><th>Shops</th><th>Earned</th><th>Spent</th></tr></thead>
+      <tbody id="leaderboard"></tbody>
+    </table>
+  </div>
+
+  <footer>PoC v0.3.1 · manual + sim share one constant block</footer>
+
+<script>
+// ═══ TOKENOMICS v0.3.1 — shared by manual play AND simulation ═════════
+// Tune ONLY here. Both modes read these constants.
+
+const PRICE_MULT = 1.18;
+const BURN_RATE = 0.60;
+const UPKEEP_RATE = 0.12;
+const PRODUCTION_EXP = 0.93;
+const GLOBAL_EMISSION_MULT = 2.5;
+const SPIN_COST = 12;
+
+const SHOPS = [
+  { id: 'garden',       name: 'Garden Lemonade Stand',        baseCost: 1,     payback: 10 },
+  { id: 'cart',         name: 'Mobile Lemonade Cart',         baseCost: 20,    payback: 9 },
+  { id: 'store',        name: 'Lemonade Store',              baseCost: 100,   payback: 8 },
+  { id: 'factory',      name: 'Lemonade Factory',            baseCost: 1800,  payback: 8 },
+  { id: 'warehouse',    name: 'Lemonade Warehouse',          baseCost: 22000, payback: 7 },
+  { id: 'distribution', name: 'Lemonade Distribution Center', baseCost: 280000, payback: 6 },
+].map(s => ({ ...s, baseRate: s.baseCost / (s.payback * 3600) }));
+
+const ECON_LABEL = `v0.3.1: ${SHOPS[0].payback}h payback · ${BURN_RATE*100}% buy burn · ${UPKEEP_RATE*100}% upkeep · n^${PRODUCTION_EXP}`;
+
+const UPGRADES = [
+  { id: 'global',   name: 'Sunny Day (+8% all)',        baseCost: 20,  max: 12, effect: (lv) => 1 + lv * 0.08 },
+  { id: 'cart',     name: 'Cart Wheels (+15% carts)',   baseCost: 40,  max: 8,  effect: (lv) => 1 + lv * 0.15, shopId: 'cart' },
+  { id: 'factory',  name: 'Assembly Line (+15% fact.)', baseCost: 300, max: 8,  effect: (lv) => 1 + lv * 0.15, shopId: 'factory' },
+  { id: 'discount', name: 'Bulk Supplier (−4% cost)',  baseCost: 80,  max: 6,  effect: (lv) => Math.max(0.78, 1 - lv * 0.04) },
+];
+
+const SPIN_REWARDS = [
+  { label: '+5% output (1h)', weight: 40, fn: (p) => { p.tempBoost = Math.max(p.tempBoost, 3600); p.tempMult = 1.05; } },
+  { label: 'Golden Stand skin', weight: 35, fn: () => {} },
+  { label: '+10% output (1h)', weight: 15, fn: (p) => { p.tempBoost = Math.max(p.tempBoost, 3600); p.tempMult = 1.10; } },
+  { label: 'Trophy frame', weight: 10, fn: () => {} },
+];
+
+// ─── State ───────────────────────────────────────────────────────────
+const player = freshPlayer('You');
+let bots = [];
+let season = { active: false, endTime: 0, durationMs: 0, stake: 1000 };
+let lastTick = performance.now();
+let tickInterval = null;
+
+function freshPlayer(name) {
+  return {
+    name, wallet: 0, staked: 0,
+    shops: Object.fromEntries(SHOPS.map(s => [s.id, 0])),
+    shopInvested: 0,
+    upgrades: Object.fromEntries(UPGRADES.map(u => [u.id, 0])),
+    upgradeInvested: 0,
+    earned: 0, spent: 0, minted: 0, burned: 0,
+    upkeepBurned: 0, purchaseBurned: 0,
+    tempBoost: 0, tempMult: 1,
+    lastAction: 0,
+    isEfficient: true,
+    active: false,
+    joinAt: 0,
+    marketBought: 0,
+    spinTimes: [],
+    spinIndex: 0,
+    spinsDone: 0,
+  };
+}
+
+// ─── Math ────────────────────────────────────────────────────────────
+function shopCost(shop, p) {
+  const owned = p.shops[shop.id];
+  const discount = UPGRADES.find(u => u.id === 'discount').effect(p.upgrades.discount || 0);
+  return shop.baseCost * Math.pow(PRICE_MULT, owned) * discount;
+}
+
+function upgradeCost(up, p) {
+  const lv = p.upgrades[up.id];
+  if (lv >= up.max) return Infinity;
+  return up.baseCost * Math.pow(PRICE_MULT, lv);
+}
+
+function productionRate(p) {
+  const globalMult = UPGRADES.find(u => u.id === 'global').effect(p.upgrades.global || 0);
+  const temp = p.tempBoost > 0 ? p.tempMult : 1;
+  let rate = 0;
+  for (const shop of SHOPS) {
+    const owned = p.shops[shop.id];
+    if (!owned) continue;
+    let typeMult = 1;
+    for (const up of UPGRADES) {
+      if (up.shopId === shop.id) typeMult *= up.effect(p.upgrades[up.id] || 0);
+    }
+    rate += shop.baseRate * Math.pow(owned, PRODUCTION_EXP) * globalMult * typeMult;
+  }
+  return rate * temp;
+}
+
+function netProductionRate(p) { return productionRate(p) * (1 - UPKEEP_RATE); }
+
+function netWorth(p) {
+  return p.wallet + p.staked + p.shopInvested + p.upgradeInvested;
+}
+
+function affordEta(cost, wallet, netPerSec) {
+  if (wallet >= cost || netPerSec <= 0) return '';
+  const secs = (cost - wallet) / netPerSec;
+  if (secs < 3600) return ` · ~${Math.ceil(secs / 60)}m to afford`;
+  return ` · ~${(secs / 3600).toFixed(1)}h to afford`;
+}
+
+function totalShops(p) {
+  return Object.values(p.shops).reduce((a, b) => a + b, 0);
+}
+
+function fmt(n, d = 2) {
+  if (!isFinite(n)) return '∞';
+  if (Math.abs(n) >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+  if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+  if (Math.abs(n) >= 1e3) return (n / 1e3).toFixed(2) + 'K';
+  return n.toFixed(d);
+}
+
+// ─── Production & purchases ──────────────────────────────────────────
+function applyProductionBatch(players, dt, emissionPool) {
+  const grosses = players.map(p => productionRate(p) * dt);
+  const totalGross = grosses.reduce((a, b) => a + b, 0);
+  const totalNet = totalGross * (1 - UPKEEP_RATE);
+
+  players.forEach((p, i) => {
+    const gross = grosses[i];
+    if (gross <= 0) return;
+    const upkeep = gross * UPKEEP_RATE;
+    p.burned += upkeep;
+    p.upkeepBurned += upkeep;
+    p.earned += gross;
+
+    let mint = totalGross > 0 ? totalNet * (gross / totalGross) : 0;
+    if (emissionPool) {
+      const room = Math.max(0, emissionPool.budget - emissionPool.minted);
+      mint = Math.min(mint, room);
+      emissionPool.minted += mint;
+    }
+    p.wallet += mint;
+    p.minted += mint;
+  });
+}
+
+function spendWithBurn(p, cost) {
+  if (p.wallet < cost) return false;
+  p.wallet -= cost;
+  const burn = cost * BURN_RATE;
+  p.burned += burn;
+  p.purchaseBurned += burn;
+  p.spent += cost;
+  return true;
+}
+
+function purchaseShop(shopId, p = player) {
+  const shop = SHOPS.find(s => s.id === shopId);
+  const cost = shopCost(shop, p);
+  if (!spendWithBurn(p, cost)) return false;
+  p.shops[shop.id]++;
+  p.shopInvested += cost;
+  return true;
+}
+
+function purchaseUpgrade(id, p = player) {
+  const up = UPGRADES.find(u => u.id === id);
+  const cost = upgradeCost(up, p);
+  if (!spendWithBurn(p, cost)) return false;
+  p.upgrades[up.id]++;
+  p.upgradeInvested += cost;
+  return true;
+}
+
+function spin(p = player) {
+  if (!spendWithBurn(p, SPIN_COST)) return null;
+  p.spinsDone = (p.spinsDone || 0) + 1;
+  const totalW = SPIN_REWARDS.reduce((a, r) => a + r.weight, 0);
+  let roll = Math.random() * totalW;
+  for (const r of SPIN_REWARDS) {
+    roll -= r.weight;
+    if (roll <= 0) { r.fn(p); return r.label; }
+  }
+  return '—';
+}
+
+// ─── AI ──────────────────────────────────────────────────────────────
+function marginalShopROI(shop, p) {
+  const cost = shopCost(shop, p);
+  if (!isFinite(cost) || cost <= 0) return 0;
+  const owned = p.shops[shop.id];
+  const globalMult = UPGRADES.find(u => u.id === 'global').effect(p.upgrades.global || 0);
+  let typeMult = 1;
+  for (const up of UPGRADES) {
+    if (up.shopId === shop.id) typeMult *= up.effect(p.upgrades[up.id] || 0);
+  }
+  const before = owned > 0 ? Math.pow(owned, PRODUCTION_EXP) : 0;
+  const after = Math.pow(owned + 1, PRODUCTION_EXP);
+  const rateGain = shop.baseRate * (after - before) * globalMult * typeMult * (1 - UPKEEP_RATE);
+  return rateGain / cost;
+}
+
+function efficientAI(p, gameTime, simMode = false) {
+  if (p.wallet < 1) return;
+  if (simMode && Math.random() < 0.06) return; // not online every tick
+
+  const candidates = SHOPS
+    .map(s => ({ shop: s, roi: marginalShopROI(s, p), cost: shopCost(s, p) }))
+    .filter(x => x.roi > 0 && x.cost <= p.wallet)
+    .sort((a, b) => b.roi - a.roi);
+
+  if (candidates.length > 0) {
+    let idx = 0;
+    if (simMode && candidates.length > 1 && Math.random() < 0.15) idx = 1;
+    purchaseShop(candidates[idx].shop.id, p);
+    return;
+  }
+
+  for (const up of UPGRADES) {
+    const cost = upgradeCost(up, p);
+    if (cost <= p.wallet * 0.35 && p.upgrades[up.id] < up.max) {
+      purchaseUpgrade(up.id, p);
+      return;
+    }
+  }
+  if (!simMode && p.wallet >= SPIN_COST * 3 && gameTime % 86400 < 3600) spin(p);
+}
+
+function casualAI(p, gameTime) {
+  if (gameTime - p.lastAction < 21600) return; // act every 6 game-hours
+  p.lastAction = gameTime;
+  const affordable = SHOPS.filter(s => shopCost(s, p) <= p.wallet).sort((a, b) => shopCost(a, p) - shopCost(b, p));
+  if (affordable.length) purchaseShop(affordable[0].id, p);
+  else if (p.wallet >= SPIN_COST * 2 && Math.random() < 0.1) spin(p);
+}
+
+function updateMixLabel() {
+  const pct = parseInt(document.getElementById('simEfficientPct').value) || 0;
+  document.getElementById('simMixLabel').textContent =
+    `${pct}% efficient · ${100 - pct}% casual`;
+}
+
+function runPlayerAI(p, gameTime, simMode = false) {
+  if (p.isEfficient) efficientAI(p, gameTime, simMode);
+  else casualAI(p, gameTime);
+}
+
+function randomMarketBuy(avg) {
+  if (avg <= 0) return 0;
+  return avg * (0.25 + Math.random() * 1.75);
+}
+
+function scheduleSpins(avg, seasonSec, joinAt) {
+  const n = Math.max(0, Math.round(avg + (Math.random() - 0.5) * Math.max(2, avg)));
+  const times = [];
+  // Bias spins to mid/late season when players have wallet balance
+  const windowStart = joinAt + (seasonSec - joinAt) * 0.2;
+  const window = Math.max(3600, seasonSec - windowStart);
+  for (let i = 0; i < n; i++) times.push(windowStart + Math.random() * window);
+  return times.sort((a, b) => a - b);
+}
+
+function activatePlayer(p, stake) {
+  if (p.active) return;
+  p.active = true;
+  p.staked = stake;
+  p.wallet = 1 + p.marketBought;
+  purchaseShop('garden', p);
+}
+
+function processScheduledSpins(p, gameTime, dt) {
+  while (p.spinIndex < p.spinTimes.length && p.spinTimes[p.spinIndex] <= gameTime) {
+    if (p.wallet >= SPIN_COST) {
+      spin(p);
+      p.spinIndex++;
+    } else {
+      break; // retry next tick when player can afford it
+    }
+  }
+}
+
+function netWorthSpread(players) {
+  const nw = players.map(netWorth).sort((a, b) => b - a);
+  if (!nw.length) return { top: 0, bottom: 0, med: 0, ratio: 1 };
+  const top = nw[0], bottom = nw[nw.length - 1], med = nw[Math.floor(nw.length / 2)];
+  return { top, bottom, med, ratio: bottom > 0 ? top / bottom : Infinity };
+}
+
+// ─── Simulation engine ───────────────────────────────────────────────
+function runSimulation() {
+  const numPlayers = parseInt(document.getElementById('simPlayers').value) || 100;
+  const days = parseInt(document.getElementById('simDays').value) || 14;
+  const stake = parseFloat(document.getElementById('simStake').value) || 1000;
+  const efficientPct = parseInt(document.getElementById('simEfficientPct').value) || 0;
+  const usePool = document.getElementById('simPool').value === 'on';
+  const avgMarket = parseFloat(document.getElementById('simAvgMarket').value) || 0;
+  const marketPct = parseInt(document.getElementById('simMarketPct').value) || 0;
+  const avgSpins = parseFloat(document.getElementById('simAvgSpins').value) || 0;
+  const joinSpreadDays = parseFloat(document.getElementById('simJoinSpread').value) || 0;
+  const seasonSec = days * 86400;
+  const dt = 600;
+  const steps = Math.ceil(seasonSec / dt);
+
+  const emissionPool = usePool ? { budget: numPlayers * stake * GLOBAL_EMISSION_MULT, minted: 0 } : null;
+  const numEfficient = Math.round(numPlayers * efficientPct / 100);
+  const joinSpreadSec = joinSpreadDays * 86400;
+
+  const players = Array.from({ length: numPlayers }, (_, i) => {
+    const p = freshPlayer(`P${i + 1}`);
+    p.isEfficient = i < numEfficient;
+    p.joinAt = joinSpreadSec > 0 ? Math.random() * joinSpreadSec : 0;
+    p.joinAt = Math.min(p.joinAt, Math.max(0, seasonSec - 3600));
+    if (Math.random() * 100 < marketPct) p.marketBought = randomMarketBuy(avgMarket);
+    p.spinTimes = scheduleSpins(avgSpins, seasonSec, p.joinAt);
+    return p;
+  });
+  for (let i = players.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [players[i].isEfficient, players[j].isEfficient] = [players[j].isEfficient, players[i].isEfficient];
+  }
+
+  const t0 = performance.now();
+  for (let step = 0; step < steps; step++) {
+    const gameTime = step * dt;
+    for (const p of players) {
+      if (!p.active && gameTime >= p.joinAt) activatePlayer(p, stake);
+    }
+    const active = players.filter(p => p.active);
+    applyProductionBatch(active, dt, emissionPool);
+    for (const p of active) {
+      if (p.tempBoost > 0) { p.tempBoost -= dt; if (p.tempBoost <= 0) p.tempMult = 1; }
+      processScheduledSpins(p, gameTime, dt);
+      runPlayerAI(p, gameTime, true);
+    }
+  }
+  const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
+
+  const efficientPlayers = players.filter(p => p.isEfficient);
+  const casualPlayers = players.filter(p => !p.isEfficient);
+  const cohortStats = (list) => ({
+    n: list.length,
+    minted: list.reduce((s, p) => s + p.minted, 0),
+    burned: list.reduce((s, p) => s + p.burned, 0),
+    shops: list.length ? list.reduce((s, p) => s + totalShops(p), 0) / list.length : 0,
+    spins: list.reduce((s, p) => s + (p.spinsDone || 0), 0),
+  });
+  const eff = cohortStats(efficientPlayers);
+  const cas = cohortStats(casualPlayers);
+
+  const totalMinted = players.reduce((s, p) => s + p.minted, 0);
+  const totalBurned = players.reduce((s, p) => s + p.burned, 0);
+  const totalMarket = players.reduce((s, p) => s + p.marketBought, 0);
+  const totalSpins = players.reduce((s, p) => s + (p.spinsDone || 0), 0);
+  const totalUpkeep = players.reduce((s, p) => s + p.upkeepBurned, 0);
+  const totalPurchaseBurn = players.reduce((s, p) => s + p.purchaseBurned, 0);
+  const net = totalMinted - totalBurned;
+  const ratio = totalMinted > 0 ? totalBurned / totalMinted : 0;
+
+  const sorted = [...players].sort((a, b) => netWorth(b) - netWorth(a));
+  const top = sorted[0];
+  const med = sorted[Math.floor(numPlayers / 2)];
+  const bottom = sorted[numPlayers - 1];
+  const spread = netWorthSpread(players);
+  const avgShops = players.reduce((s, p) => s + totalShops(p), 0) / numPlayers;
+  const avgMinted = totalMinted / numPlayers;
+  const avgJoinDay = players.reduce((s, p) => s + p.joinAt, 0) / numPlayers / 86400;
+
+  let health;
+  if (ratio >= 0.95 && ratio <= 1.15) health = '✓ Balanced (burn/mint ' + (ratio * 100).toFixed(0) + '%)';
+  else if (ratio < 0.95) health = '⚠ Inflationary (mints > burns)';
+  else health = '⚠ Deflationary (burns > mints)';
+
+  const poolLine = emissionPool
+    ? `Global pool budget:  ${fmt(emissionPool.budget)}  (used ${fmt(emissionPool.minted)} / ${(emissionPool.minted/emissionPool.budget*100).toFixed(0)}%)\n`
+    : `Global pool:         OFF — minted ${fmt(totalMinted)} vs cap ${fmt(numPlayers * stake * GLOBAL_EMISSION_MULT)} if pool were ON\n`;
+
+  const poolAdvice = !emissionPool && totalMinted > numPlayers * stake * GLOBAL_EMISSION_MULT
+    ? `  ⚠ Mint exceeded pool cap by ${fmt(totalMinted - numPlayers * stake * GLOBAL_EMISSION_MULT)} — use pool ON for on-chain\n`
+    : '';
+
+  const mixLine = `${eff.n} efficient (${efficientPct}%) · ${cas.n} casual (${100 - efficientPct}%)\n`;
+  const varianceNote = spread.ratio < 1.05
+    ? '⚠ All players nearly identical — increase join spread / DEX buys'
+    : `Leaderboard spread:  top ${fmt(spread.top)} vs bottom ${fmt(spread.bottom)} (${spread.ratio.toFixed(1)}×)`;
+
+  document.getElementById('simResults').textContent =
+`${numPlayers} players · ${days} days · ${elapsed}s compute
+${mixLine}
+REAL-WORLD VARIANCE
+  Avg join day:        ${avgJoinDay.toFixed(1)} (spread 0–${joinSpreadDays}d)
+  DEX buys (recycled): ${fmt(totalMarket)} $LEMON (${marketPct}% buy, ~${fmt(avgMarket)} avg)
+  Total spins:         ${totalSpins} (avg ${(totalSpins/numPlayers).toFixed(1)}/player, target ${avgSpins})
+  ${varianceNote}
+
+AGGREGATE (shop mints — DEX buys are NOT new mints)
+  Total minted:        ${fmt(totalMinted)}
+  Total burned:        ${fmt(totalBurned)}
+    ↳ upkeep:          ${fmt(totalUpkeep)}
+    ↳ purchases+spins: ${fmt(totalPurchaseBurn)}
+  Net supply Δ:        ${net >= 0 ? '+' : ''}${fmt(net)}
+  Burn / mint ratio:     ${(ratio * 100).toFixed(1)}%
+  ${health}
+${poolAdvice}${poolLine}
+BY COHORT (avg per player)
+  Efficient:           minted ${fmt(eff.n ? eff.minted/eff.n : 0)} · burned ${fmt(eff.n ? eff.burned/eff.n : 0)} · ${eff.shops.toFixed(1)} shops · ${(eff.spins/Math.max(1,eff.n)).toFixed(1)} spins
+  Casual:              minted ${fmt(cas.n ? cas.minted/cas.n : 0)} · burned ${fmt(cas.n ? cas.burned/cas.n : 0)} · ${cas.shops.toFixed(1)} shops · ${(cas.spins/Math.max(1,cas.n)).toFixed(1)} spins
+
+PER PLAYER (avg)
+  Minted:              ${fmt(avgMinted)}
+  Shops owned:         ${avgShops.toFixed(1)}
+
+SAMPLE PLAYERS (winners & losers)
+  #1 ${top.name}${top.isEfficient ? ' ⚡' : ' ☕'}:  NW ${fmt(netWorth(top))} · join d${(top.joinAt/86400).toFixed(1)} · DEX +${fmt(top.marketBought)} · ${totalShops(top)} shops
+  Median:    NW ${fmt(netWorth(med))} · join d${(med.joinAt/86400).toFixed(1)} · ${totalShops(med)} shops
+  #${numPlayers} ${bottom.name}${bottom.isEfficient ? ' ⚡' : ' ☕'}: NW ${fmt(netWorth(bottom))} · join d${(bottom.joinAt/86400).toFixed(1)} · DEX +${fmt(bottom.marketBought)} · ${totalShops(bottom)} shops`;
+}
+
+// ─── Live season ─────────────────────────────────────────────────────
+function startSeason() {
+  const startBal = parseFloat(document.getElementById('startBalance').value) || 1001;
+  const stake = parseFloat(document.getElementById('stakeInput').value) || 1000;
+  const days = parseFloat(document.getElementById('seasonDays').value) || 14;
+  if (startBal <= stake) { alert('Need more than stake to buy first shop'); return; }
+
+  Object.assign(player, freshPlayer('You'));
+  player.wallet = startBal - stake;
+  player.staked = stake;
+  player.active = true;
+
+  bots = ['Alice', 'Bob', 'Carol'].map(n => {
+    const p = freshPlayer(n);
+    p.active = true;
+    p.staked = stake;
+    p.wallet = 500 + Math.random() * 300;
+    return p;
+  });
+
+  season = { active: true, stake, durationMs: days * 86400000, endTime: Date.now() + days * 86400000 / getSpeed() };
+  document.getElementById('btnStartSeason').disabled = true;
+  document.getElementById('btnEndSeason').disabled = false;
+  document.getElementById('btnEarlyUnstake').disabled = false;
+  document.getElementById('btnSpin').disabled = false;
+  document.getElementById('sponsorBanner').classList.add('active');
+
+  if (tickInterval) clearInterval(tickInterval);
+  lastTick = performance.now();
+  tickInterval = setInterval(gameTick, 1000);
+  render();
+}
+
+function endSeason() {
+  if (!season.active) return;
+  season.active = false;
+  clearInterval(tickInterval);
+  player.wallet += player.staked;
+  player.staked = 0;
+  bots.forEach(b => { b.wallet += b.staked; b.staked = 0; });
+  [player, ...bots].forEach(p => {
+    p.shops = Object.fromEntries(SHOPS.map(s => [s.id, 0]));
+    p.upgrades = Object.fromEntries(UPGRADES.map(u => [u.id, 0]));
+    p.shopInvested = p.upgradeInvested = 0;
+    p.tempBoost = 0;
+  });
+  document.getElementById('btnStartSeason').disabled = false;
+  document.getElementById('btnEndSeason').disabled = true;
+  document.getElementById('btnEarlyUnstake').disabled = true;
+  document.getElementById('btnSpin').disabled = true;
+  document.getElementById('seasonStatus').textContent = 'Ended';
+  render();
+}
+
+function earlyUnstake() {
+  if (!season.active || !player.staked) return;
+  player.burned += player.staked * 0.5;
+  player.purchaseBurned += player.staked * 0.5;
+  player.wallet += player.staked * 0.5;
+  player.staked = 0;
+  season.active = false;
+  clearInterval(tickInterval);
+  document.getElementById('btnEarlyUnstake').disabled = true;
+  render();
+}
+
+function getSpeed() { return parseFloat(document.getElementById('speedMult').value) || 1; }
+
+function gameTick() {
+  const now = performance.now();
+  const dt = ((now - lastTick) / 1000) * getSpeed();
+  lastTick = now;
+  if (!season.active) return;
+  if (Date.now() >= season.endTime) { endSeason(); return; }
+
+  const all = [player, ...bots];
+  applyProductionBatch(all, dt, null);
+  all.forEach(p => {
+    if (p.tempBoost > 0) { p.tempBoost -= dt; if (p.tempBoost <= 0) p.tempMult = 1; }
+  });
+  bots.forEach(b => efficientAI(b, 0));
+  render();
+}
+
+// ─── Render ──────────────────────────────────────────────────────────
+function renderShops() {
+  document.getElementById('shopList').innerHTML = SHOPS.map(shop => {
+    const owned = player.shops[shop.id];
+    const cost = shopCost(shop, player);
+    const can = season.active && player.wallet >= cost;
+    const net = netProductionRate(player);
+    const eta = season.active && !can ? affordEta(cost, player.wallet, net) : '';
+    return `<div class="shop-card">
+      <div><div class="name">${shop.name}</div>
+      <div class="meta">~${shop.payback}h payback · burn ${fmt(cost * BURN_RATE)}${eta}</div>
+      <div class="owned">Owned: ${owned}</div></div>
+      <button onclick="buyShop('${shop.id}')" ${can ? '' : 'disabled'}>${fmt(cost)} 🍋</button>
+    </div>`;
+  }).join('');
+}
+
+function renderUpgrades() {
+  document.getElementById('upgradeList').innerHTML = UPGRADES.map(up => {
+    const lv = player.upgrades[up.id];
+    const cost = upgradeCost(up, player);
+    const maxed = lv >= up.max;
+    const can = season.active && !maxed && player.wallet >= cost;
+    return `<div class="shop-card">
+      <div><div class="name">${up.name}</div><div class="meta">Lv ${lv}/${up.max}</div></div>
+      <button class="upgrade-btn" onclick="buyUpgrade('${up.id}')" ${can ? '' : 'disabled'}>${maxed ? 'MAX' : fmt(cost) + ' 🍋'}</button>
+    </div>`;
+  }).join('');
+}
+
+function renderLeaderboard() {
+  document.getElementById('leaderboard').innerHTML = [player, ...bots]
+    .sort((a, b) => netWorth(b) - netWorth(a))
+    .map((p, i) => `<tr${p === player ? ' style="background:#243044"' : ''}>
+      <td>${i + 1}</td><td>${p.name}</td><td class="lemon">${fmt(netWorth(p))}</td>
+      <td class="mint-col">${fmt(productionRate(p), 6)}</td><td>${totalShops(p)}</td>
+      <td>${fmt(p.earned)}</td><td>${fmt(p.spent)}</td></tr>`).join('');
+}
+
+function render() {
+  const gross = productionRate(player);
+  const net = netProductionRate(player);
+  const netSupply = player.minted - player.burned;
+  const ratio = player.minted > 0 ? player.burned / player.minted : 0;
+
+  document.getElementById('wallet').textContent = fmt(player.wallet);
+  document.getElementById('netWorth').textContent = fmt(netWorth(player));
+  document.getElementById('earned').textContent = fmt(player.earned);
+  document.getElementById('spent').textContent = fmt(player.spent);
+  document.getElementById('invested').textContent = fmt(player.shopInvested + player.upgradeInvested);
+  document.getElementById('prodRate').textContent = fmt(net, 6) + ' /sec net';
+  const speed = season.active ? getSpeed() : 1;
+  document.getElementById('hourlyRate').textContent = fmt(net * 3600) + ' /hr';
+  document.getElementById('realMinRate').textContent = fmt(net * 60 * speed) + ' /min';
+  document.getElementById('speedHint').textContent = season.active ? `(${speed}×)` : '(1×)';
+  document.getElementById('econConstants').textContent = ECON_LABEL;
+  document.getElementById('stakeAmt').textContent = fmt(player.staked);
+  document.getElementById('totalMinted').textContent = fmt(player.minted);
+  document.getElementById('totalBurned').textContent = fmt(player.burned);
+  document.getElementById('upkeepBurned').textContent = fmt(player.upkeepBurned);
+  document.getElementById('purchaseBurned').textContent = fmt(player.purchaseBurned);
+  document.getElementById('netSupply').textContent = (netSupply >= 0 ? '+' : '') + fmt(netSupply);
+  document.getElementById('netSupply').className = netSupply > 0 ? 'mint-col' : 'burn';
+
+  const healthEl = document.getElementById('economyHealth');
+  if (!season.active) healthEl.textContent = '—';
+  else if (ratio >= 0.85 && ratio <= 1.1) { healthEl.textContent = '≈ Balanced'; healthEl.className = 'lemon'; }
+  else if (ratio < 0.85) { healthEl.textContent = 'Inflationary'; healthEl.className = 'mint-col'; }
+  else { healthEl.textContent = 'Deflationary'; healthEl.className = 'burn'; }
+
+  if (season.active) {
+    const left = Math.max(0, season.endTime - Date.now());
+    document.getElementById('seasonTime').textContent = `${Math.floor(left / 3600000)}h ${Math.floor((left % 3600000) / 60000)}m`;
+    document.getElementById('seasonStatus').textContent = 'Active';
+  }
+
+  const maxBM = Math.max(player.minted, player.burned, 1);
+  document.getElementById('supplyBar').innerHTML =
+    `<div class="bar-burn" style="width:${player.burned / maxBM * 100}%"></div>` +
+    `<div class="bar-mint" style="width:${player.minted / maxBM * 100}%"></div>`;
+
+  renderShops(); renderUpgrades(); renderLeaderboard();
+}
+
+document.getElementById('btnStartSeason').onclick = startSeason;
+document.getElementById('btnEndSeason').onclick = endSeason;
+document.getElementById('btnEarlyUnstake').onclick = earlyUnstake;
+document.getElementById('btnRunSim').onclick = runSimulation;
+document.getElementById('simEfficientPct').oninput = updateMixLabel;
+updateMixLabel();
+document.getElementById('btnSpin').onclick = () => {
+  const r = spin();
+  document.getElementById('spinResult').textContent = r ? `Won: ${r}` : 'Not enough $LEMON';
+  render();
+};
+
+window.buyShop = (id) => { purchaseShop(id, player); render(); };
+window.buyUpgrade = (id) => { purchaseUpgrade(id, player); render(); };
+render();
+</script>
+</body>
+</html>
