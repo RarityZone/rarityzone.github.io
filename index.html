@@ -35,6 +35,7 @@
     label { font-size: 0.85rem; color: var(--muted); }
     input[type="number"], select { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 0.35rem 0.5rem; border-radius: 4px; width: 5rem; }
     input.wide { width: 6rem; }
+    input.lp-input { width: 5.5rem; }
     input[type="range"] { width: 140px; vertical-align: middle; accent-color: var(--lemon); }
     .mix-label { font-size: 0.85rem; color: var(--lemon); min-width: 11rem; display: inline-block; }
     .banner { background: linear-gradient(90deg, #2d3a4f, #1a2332); border: 1px dashed #c9a227; border-radius: 6px; padding: 0.5rem 1rem; text-align: center; font-size: 0.8rem; color: var(--muted); margin-bottom: 1rem; }
@@ -54,7 +55,7 @@
 <body>
 
   <h1>🍋 Lemonade Tycoon — Tokenomics PoC</h1>
-  <p class="subtitle">v0.3.1 — <strong>manual + simulation share identical constants</strong> (one file, one tune)</p>
+  <p class="subtitle">v0.3.2 — <strong>manual + simulation share identical constants</strong> (one file, one tune)</p>
 
   <div class="banner" id="sponsorBanner">✈️ Sponsor banner slot</div>
 
@@ -120,10 +121,18 @@
       <span class="mix-label" id="simMixLabel">50% efficient · 50% casual</span>
     </div>
     <div class="controls">
-      <label>Avg DEX buy <input type="number" id="simAvgMarket" value="200" min="0" step="50" title="Avg extra $LEMON bought from market per player (who buys)"></label>
-      <label>% buy DEX <input type="number" id="simMarketPct" value="40" min="0" max="100" title="% of players who buy extra $LEMON from DEX"></label>
-      <label>Avg spins <input type="number" id="simAvgSpins" value="5" min="0" max="100" step="1" title="Avg spinner plays per player per season"></label>
-      <label>Join spread (d) <input type="number" id="simJoinSpread" value="5" min="0" max="14" step="1" title="Max days into season players can join"></label>
+      <label>Avg DEX buy <input type="number" id="simAvgMarket" value="200" min="0" step="50" title="Avg $LEMON bought from LP per player (who buys)"></label>
+      <label>% buy DEX <input type="number" id="simMarketPct" value="40" min="0" max="100"></label>
+      <label>Avg spins <input type="number" id="simAvgSpins" value="5" min="0" max="100" step="1"></label>
+      <label>Join spread (d) <input type="number" id="simJoinSpread" value="5" min="0" max="14" step="1"></label>
+    </div>
+    <div class="controls">
+      <label>Start price <input type="number" id="simStartPrice" class="lp-input" value="0.01" min="0.001" step="0.01" title="USD per $LEMON"></label>
+      <label>LP depth <input type="number" id="simLpDepth" class="lp-input" value="10000" min="1000" step="1000" title="Total USD liquidity (50/50 pool)"></label>
+      <label>Casual sell % <input type="number" id="simCasualSell" class="lp-input" value="25" min="0" max="100" title="End-of-season wallet sold by casual players"></label>
+      <label>Eff. sell % <input type="number" id="simEffSell" class="lp-input" value="5" min="0" max="100" title="End-of-season wallet sold by efficient players"></label>
+      <label>Mid-season casual <input type="number" id="simMidSell" class="lp-input" value="8" min="0" max="50" title="% of wallet casuals sell each week"></label>
+      <label>Entry via LP <input type="number" id="simEntryLpPct" class="lp-input" value="100" min="0" max="100" title="% of players who buy stake+1 $LEMON from LP on join"></label>
     </div>
     <div id="simResults">Click Run Simulation to see aggregate tokenomics.</div>
   </div>
@@ -151,7 +160,7 @@
     </table>
   </div>
 
-  <footer>PoC v0.3.1 · manual + sim share one constant block</footer>
+  <footer>PoC v0.3.2 · manual + sim share one constant block · LP price model in sim</footer>
 
 <script>
 // ═══ TOKENOMICS v0.3.1 — shared by manual play AND simulation ═════════
@@ -211,9 +220,15 @@ function freshPlayer(name) {
     active: false,
     joinAt: 0,
     marketBought: 0,
+    buysEntryOnLp: false,
+    entryBought: 0,
     spinTimes: [],
     spinIndex: 0,
     spinsDone: 0,
+    usdSpentOnDex: 0,
+    usdSpentOnEntry: 0,
+    lemonSold: 0,
+    usdFromSells: 0,
   };
 }
 
@@ -261,6 +276,62 @@ function affordEta(cost, wallet, netPerSec) {
 
 function totalShops(p) {
   return Object.values(p.shops).reduce((a, b) => a + b, 0);
+}
+
+function fmtUsd(n) {
+  if (!isFinite(n)) return '$∞';
+  if (n >= 1000) return '$' + (n / 1000).toFixed(2) + 'K';
+  if (n >= 1) return '$' + n.toFixed(3);
+  if (n >= 0.01) return '$' + n.toFixed(4);
+  return '$' + n.toFixed(6);
+}
+
+// Constant-product AMM (x·y=k) — $LEMON / USD pair
+function createLp(startPrice, liquidityUsd) {
+  const usd = liquidityUsd / 2;
+  const lemon = usd / startPrice;
+  const k = usd * lemon;
+  return {
+    usd, lemon, k, startPrice,
+    usdBuyVol: 0, usdSellVol: 0, lemonBuyVol: 0, lemonSellVol: 0,
+    get price() { return this.usd / this.lemon; },
+    tvl() { return this.usd * 2; },
+    buyLemon(amount) {
+      if (amount <= 0) return { usdIn: 0, lemonOut: 0 };
+      const maxOut = this.lemon * 0.95;
+      const out = Math.min(amount, maxOut);
+      const newLemon = this.lemon - out;
+      const newUsd = this.k / newLemon;
+      const usdIn = newUsd - this.usd;
+      this.usd = newUsd;
+      this.lemon = newLemon;
+      this.usdBuyVol += usdIn;
+      this.lemonBuyVol += out;
+      return { usdIn, lemonOut: out };
+    },
+    sellLemon(amount) {
+      if (amount <= 0) return { usdOut: 0, lemonIn: 0 };
+      const newLemon = this.lemon + amount;
+      const newUsd = this.k / newLemon;
+      const usdOut = this.usd - newUsd;
+      this.usd = newUsd;
+      this.lemon = newLemon;
+      this.usdSellVol += usdOut;
+      this.lemonSellVol += amount;
+      return { usdOut, lemonIn: amount };
+    },
+  };
+}
+
+function sellFromWallet(p, lp, pct) {
+  if (!lp || pct <= 0) return 0;
+  const sell = p.wallet * (pct / 100);
+  if (sell < 0.01) return 0;
+  const { usdOut } = lp.sellLemon(sell);
+  p.wallet -= sell;
+  p.lemonSold = (p.lemonSold || 0) + sell;
+  p.usdFromSells = (p.usdFromSells || 0) + usdOut;
+  return sell;
 }
 
 function fmt(n, d = 2) {
@@ -412,11 +483,28 @@ function scheduleSpins(avg, seasonSec, joinAt) {
   return times.sort((a, b) => a - b);
 }
 
-function activatePlayer(p, stake) {
+function activatePlayer(p, stake, lp) {
   if (p.active) return;
   p.active = true;
-  p.staked = stake;
-  p.wallet = 1 + p.marketBought;
+  if (lp && p.buysEntryOnLp) {
+    const entryLemon = stake + 1;
+    const { usdIn, lemonOut } = lp.buyLemon(entryLemon);
+    p.usdSpentOnEntry = usdIn;
+    p.entryBought = lemonOut;
+    p.staked = Math.min(stake, lemonOut);
+    p.wallet = Math.max(0, lemonOut - p.staked);
+  } else {
+    p.staked = stake;
+    p.wallet = 1;
+  }
+  if (p.marketBought > 0) {
+    if (lp) {
+      const { usdIn, lemonOut } = lp.buyLemon(p.marketBought);
+      p.marketBought = lemonOut;
+      p.usdSpentOnDex = usdIn;
+    }
+    p.wallet += p.marketBought;
+  }
   purchaseShop('garden', p);
 }
 
@@ -449,19 +537,29 @@ function runSimulation() {
   const marketPct = parseInt(document.getElementById('simMarketPct').value) || 0;
   const avgSpins = parseFloat(document.getElementById('simAvgSpins').value) || 0;
   const joinSpreadDays = parseFloat(document.getElementById('simJoinSpread').value) || 0;
+  const startPrice = parseFloat(document.getElementById('simStartPrice').value) || 0.1;
+  const lpDepth = parseFloat(document.getElementById('simLpDepth').value) || 10000;
+  const casualSellPct = parseFloat(document.getElementById('simCasualSell').value) || 0;
+  const effSellPct = parseFloat(document.getElementById('simEffSell').value) || 0;
+  const midSellPct = parseFloat(document.getElementById('simMidSell').value) || 0;
+  const entryLpPct = parseFloat(document.getElementById('simEntryLpPct').value) ?? 100;
   const seasonSec = days * 86400;
   const dt = 600;
   const steps = Math.ceil(seasonSec / dt);
+  const weekSec = 7 * 86400;
 
+  const lp = createLp(startPrice, lpDepth);
+  const priceStart = lp.price;
   const emissionPool = usePool ? { budget: numPlayers * stake * GLOBAL_EMISSION_MULT, minted: 0 } : null;
-  const numEfficient = Math.round(numPlayers * efficientPct / 100);
   const joinSpreadSec = joinSpreadDays * 86400;
+  const numEfficient = Math.round(numPlayers * efficientPct / 100);
 
   const players = Array.from({ length: numPlayers }, (_, i) => {
     const p = freshPlayer(`P${i + 1}`);
     p.isEfficient = i < numEfficient;
     p.joinAt = joinSpreadSec > 0 ? Math.random() * joinSpreadSec : 0;
     p.joinAt = Math.min(p.joinAt, Math.max(0, seasonSec - 3600));
+    p.buysEntryOnLp = Math.random() * 100 < entryLpPct;
     if (Math.random() * 100 < marketPct) p.marketBought = randomMarketBuy(avgMarket);
     p.spinTimes = scheduleSpins(avgSpins, seasonSec, p.joinAt);
     return p;
@@ -475,7 +573,7 @@ function runSimulation() {
   for (let step = 0; step < steps; step++) {
     const gameTime = step * dt;
     for (const p of players) {
-      if (!p.active && gameTime >= p.joinAt) activatePlayer(p, stake);
+      if (!p.active && gameTime >= p.joinAt) activatePlayer(p, stake, lp);
     }
     const active = players.filter(p => p.active);
     applyProductionBatch(active, dt, emissionPool);
@@ -483,8 +581,23 @@ function runSimulation() {
       if (p.tempBoost > 0) { p.tempBoost -= dt; if (p.tempBoost <= 0) p.tempMult = 1; }
       processScheduledSpins(p, gameTime, dt);
       runPlayerAI(p, gameTime, true);
+      if (midSellPct > 0 && !p.isEfficient && gameTime > 0 && gameTime % weekSec < dt) {
+        sellFromWallet(p, lp, midSellPct);
+      }
     }
   }
+
+  for (const p of players.filter(p => p.active)) {
+    sellFromWallet(p, lp, p.isEfficient ? effSellPct : casualSellPct);
+  }
+  const priceEnd = lp.price;
+  const priceChange = priceStart > 0 ? ((priceEnd / priceStart) - 1) * 100 : 0;
+  const totalUsdBuy = players.reduce((s, p) => s + (p.usdSpentOnDex || 0), 0);
+  const totalUsdEntry = players.reduce((s, p) => s + (p.usdSpentOnEntry || 0), 0);
+  const totalEntryLemon = players.reduce((s, p) => s + (p.entryBought || 0), 0);
+  const entryLpCount = players.filter(p => p.buysEntryOnLp).length;
+  const totalUsdSell = players.reduce((s, p) => s + (p.usdFromSells || 0), 0);
+  const totalLemonSold = players.reduce((s, p) => s + (p.lemonSold || 0), 0);
   const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
 
   const efficientPlayers = players.filter(p => p.isEfficient);
@@ -535,9 +648,24 @@ function runSimulation() {
     ? '⚠ All players nearly identical — increase join spread / DEX buys'
     : `Leaderboard spread:  top ${fmt(spread.top)} vs bottom ${fmt(spread.bottom)} (${spread.ratio.toFixed(1)}×)`;
 
+  const priceDir = priceChange >= 0 ? '▲' : '▼';
+  const lpLine =
+`$LEMON PRICE (constant-product AMM, ${fmtUsd(lpDepth)} LP)
+  Start:               ${fmtUsd(priceStart)} / $LEMON
+  End:                 ${fmtUsd(priceEnd)} / $LEMON  (${priceDir}${Math.abs(priceChange).toFixed(1)}%)
+  LP TVL (end):        ${fmtUsd(lp.tvl())}
+  Entry buys (stake):  ${fmtUsd(totalUsdEntry)} USD → ${fmt(totalEntryLemon)} $LEMON (${entryLpCount}/${numPlayers} players, ${entryLpPct}% rate)
+  Extra DEX buys:      ${fmtUsd(totalUsdBuy)} USD → ${fmt(totalMarket)} $LEMON
+  Total buy volume:    ${fmtUsd(lp.usdBuyVol)} USD → ${fmt(lp.lemonBuyVol)} $LEMON
+  Sell volume:         ${fmtUsd(lp.usdSellVol)} USD ← ${fmt(totalLemonSold)} $LEMON
+  Net USD flow:        ${fmtUsd(lp.usdBuyVol - lp.usdSellVol)} into LP
+  Players received:    ${fmtUsd(totalUsdSell)} from sells
+`;
+
   document.getElementById('simResults').textContent =
 `${numPlayers} players · ${days} days · ${elapsed}s compute
 ${mixLine}
+${lpLine}
 REAL-WORLD VARIANCE
   Avg join day:        ${avgJoinDay.toFixed(1)} (spread 0–${joinSpreadDays}d)
   DEX buys (recycled): ${fmt(totalMarket)} $LEMON (${marketPct}% buy, ~${fmt(avgMarket)} avg)
@@ -562,7 +690,7 @@ PER PLAYER (avg)
   Shops owned:         ${avgShops.toFixed(1)}
 
 SAMPLE PLAYERS (winners & losers)
-  #1 ${top.name}${top.isEfficient ? ' ⚡' : ' ☕'}:  NW ${fmt(netWorth(top))} · join d${(top.joinAt/86400).toFixed(1)} · DEX +${fmt(top.marketBought)} · ${totalShops(top)} shops
+  #1 ${top.name}${top.isEfficient ? ' ⚡' : ' ☕'}:  NW ${fmt(netWorth(top))} · join d${(top.joinAt/86400).toFixed(1)} · DEX +${fmt(top.marketBought)} (${fmtUsd(top.usdSpentOnDex || 0)}) · ${totalShops(top)} shops
   Median:    NW ${fmt(netWorth(med))} · join d${(med.joinAt/86400).toFixed(1)} · ${totalShops(med)} shops
   #${numPlayers} ${bottom.name}${bottom.isEfficient ? ' ⚡' : ' ☕'}: NW ${fmt(netWorth(bottom))} · join d${(bottom.joinAt/86400).toFixed(1)} · DEX +${fmt(bottom.marketBought)} · ${totalShops(bottom)} shops`;
 }
